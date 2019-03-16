@@ -128,7 +128,7 @@ class State:
     def go(self, symbol=None):
         # if there's no transition rule registered for the symbol than state isn't changing
         if symbol is not None:
-            return self._transition.get(symbol, self)
+            return self._transition.get(symbol, (self, 1))[0]
         return self._rand_acceptable_transition()
 
 
@@ -242,8 +242,10 @@ class FST:
         # activate states sequentially and return final state
         if sequence is not None:
             for symbol in sequence:
+                if symbol not in self._alphabet:
+                    return curr_state, False
                 curr_state = self._transitions[curr_state.id].go(symbol)
-                return curr_state, curr_state.is_accept
+            return curr_state, curr_state.is_accept
         else:
             # start from an empty sequence
             sequence = []
@@ -306,8 +308,13 @@ if __name__ == "__main__":
         ("q3", "b", "q3")
     ]
     _fst = FST(_alphabet, _states, _init_state, _accept_state, _accept_weight, _transitions)
+    print("unweighted FST")
     print(_fst)
-    _fst.go()
+    assert _fst.go("aaabbbbb")[1]
+    assert not _fst.go("aaabbbbba")[1]
+    rand = "".join(_fst.go())
+    print("sample:" + rand)
+    assert _fst.go(rand)
 
     # Verse-2
     _alphabet = ["a", "b"]
@@ -326,6 +333,11 @@ if __name__ == "__main__":
         ("q3", "b", "q3")
     ]
     _fst = FST(_alphabet, _states, _init_state, _accept_state, _accept_weight, _transitions)
+    print("\n\nweighted FST")
     print(_fst)
-    _fst.go()
+    assert _fst.go("aaabbbbb")[1]
+    assert not _fst.go("aaabbbbba")[1]
+    rand = "".join(_fst.go())
+    print("sample:" + rand)
+    assert _fst.go(rand)
     e = 0
