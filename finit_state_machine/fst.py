@@ -1,8 +1,9 @@
 from random import randint, choice
 import networkx as nx
-EPS_MOVE = "eps"
+EPS_MOVE = "EPS_MOVE"
 ACCEPT_SYMBOL = "ACC_SYM"
 ACCEPT_STATE = "ACC_STATE"
+REJECT_STATE = "REJ_STATE"
 
 
 class State:
@@ -15,15 +16,16 @@ class State:
     is_init:        True if its an initial state
     is_accept:      True if its an accept state
     """
-    def __init__(self, state_name, transitions: dict= None, is_init=False, is_accept=False, is_reject=False,
-                 artificial_accept=False):
+    def __init__(self, state_name, reject_state, transitions: dict= None, is_init=False, is_accept=False,
+                 is_reject=False, artificial_accept=False):
         self._source = state_name
+        self._reject_state = reject_state
         self._transition = transitions if transitions else {}
         self._is_initial_state = is_init
         self._is_accept_state = is_accept
         self._is_reject_state = is_reject
         self._is_art_accept_state = artificial_accept
-        self._weights = ([], 0)
+        self._weights = [("sym", "<<>>", 0)]
         self._edited = True
         self._weighted = False
 
@@ -128,7 +130,9 @@ class State:
     def go(self, symbol=None):
         # if there's no transition rule registered for the symbol than state isn't changing
         if symbol is not None:
-            return self._transition.get(symbol, (self, 1))[0]
+            if symbol not in self._transition:
+                return self._reject_state
+            return self._transition.get(symbol)[0]
         return self._rand_acceptable_transition()
 
 
@@ -220,11 +224,12 @@ class FST:
     """
     def _build_transitions(self, states, init_state, accept_state, accept_weight, transitions):
         reject_states = self._get_reject_states(transitions, accept_state)
+        global_reject_state = State(REJECT_STATE, None, is_reject=True)  # artificial reject state
         # build a dictionary of name to State objects
-        state_dict = {q: State(q, is_init=q == init_state, is_accept=q == accept_state,
+        state_dict = {q: State(q, global_reject_state, is_init=q == init_state, is_accept=q == accept_state,
                                is_reject=q in reject_states) for q in states}
         # add a artificial node for accept state
-        state_dict[ACCEPT_STATE] = State(ACCEPT_STATE, artificial_accept=True)
+        state_dict[ACCEPT_STATE] = State(ACCEPT_STATE, global_reject_state, artificial_accept=True)
         transitions.append((accept_state, ACCEPT_SYMBOL, ACCEPT_STATE, accept_weight))
         for tran in transitions:
             source, symbol, target, weight = tran if len(tran) == 4 else list(tran) + [1]
@@ -242,9 +247,9 @@ class FST:
         # activate states sequentially and return final state
         if sequence is not None:
             for symbol in sequence:
-                if symbol not in self._alphabet:
-                    return curr_state, False
                 curr_state = self._transitions[curr_state.id].go(symbol)
+                if curr_state.is_reject:
+                    break
             return curr_state, curr_state.is_accept
         else:
             # start from an empty sequence
