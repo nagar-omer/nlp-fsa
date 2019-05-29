@@ -7,7 +7,6 @@ ALPHABET_SIZE = 3
 class BinaryFSTParams(FSTParams):
     def __init__(self):
         super().__init__()
-
         self.DATASET_SIZE = 10000
         self.NEGATIVE_SAMPLES = True
         self.FST_ALPHABET_SIZE = ALPHABET_SIZE

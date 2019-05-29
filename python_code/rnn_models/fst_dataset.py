@@ -24,7 +24,6 @@ class FstDataset(Dataset):
         negative_size = size - positive_size
         positive = []
         negative = []
-        data = []
         # add positive samples
         for _ in range(positive_size * 2):
             # data.append(([self._chr_embed[symbol] for symbol in self._fst.go()], 1))
@@ -32,8 +31,10 @@ class FstDataset(Dataset):
         # add negative samples
         positive = [(list(x), 1) for x in set(tuple(x) for x in positive)][:positive_size]
         for i in range(negative_size * 2):
-            # data.append(([self._chr_embed[symbol] for symbol in self._fst.generate_negative(max_size=len(data[i][0]) + 1)], 0))
-            negative.append([self._chr_embed[symbol] for symbol in self._fst.generate_negative(max_size=len(positive[i % len(positive)][0]) + 1)])
+            # data.append(([self._chr_embed[symbol] for symbol in
+            #               self._fst.generate_negative(max_size=len(data[i][0]) + 1)], 0))
+            negative.append([self._chr_embed[symbol] for symbol in
+                             self._fst.generate_negative(sample_len=len(positive[i % len(positive)][0]) + 1)])
         negative = [(list(x), 0) for x in set(tuple(x) for x in negative)][:negative_size]
         data = negative + positive
         shuffle(data)

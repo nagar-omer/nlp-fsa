@@ -1,10 +1,16 @@
 from random import randint, choice
 import networkx as nx
 from random import randint
+from graphviz import Digraph
+import os
+os.environ["PATH"] += os.pathsep + r"D:\Program Files (x86)\Graphviz2.38\bin"
 EPS_MOVE = "EPS_MOVE"
 ACCEPT_SYMBOL = "ACC_SYM"
 ART_ACCEPT_STATE = "ART_ACC_STATE"
 REJECT_STATE = "REJ_STATE"
+OUT_DEG = "_OUT_DEG_"
+IN_DEG = "_IN_DEG_"
+IN_AND_OUT_DEG = "_IN_OUT_DEG_"
 
 
 class State:
@@ -31,7 +37,6 @@ class State:
         self._edited = True                                     # true if a transition is edited
         self._base_weight = None                                # weight of last edited transition
         self._weighted = False                                  # true if there is different weight for transitions
-        self._is_utterly_accept = self._check_utterly_accept()  # if a un-accept state can be reached from this state
 
     @property
     def id(self):
@@ -44,22 +49,6 @@ class State:
     @property
     def is_accept(self):
         return self._is_accept_state
-
-    # special property that indicates if a not accept state can be reached from this state
-    @property
-    def is_utterly_accept(self):
-        return self._is_utterly_accept
-
-    # check if the state is not accept state or if not-accept state can be reached
-    def _check_utterly_accept(self):
-        if self._source == ART_ACCEPT_STATE:
-            return True
-        if not self._is_accept_state:
-            return False
-        # if the transition list is empty return an epsilon move
-        tran_list = [0 for (symbol, (target, weight)) in self._transition.items()
-                     if not target.is_accept]
-        return False if tran_list else True
 
     @property
     def is_art_accept(self):
@@ -162,13 +151,8 @@ class State:
 
     # end = True  -> generate a not accept state
     # end = False -> an accept state can be generate as long as it not utterly accept
-    def go_negative(self, end=False):
-        if end:
-            tran_list = [(symbol, target) for (symbol, (target, weight)) in self._transition.items()
-                         if not target.is_accept]
-        else:
-            tran_list = [(symbol, target) for (symbol, (target, weight)) in self._transition.items()
-                         if not target.is_utterly_accept]
+    def go_negative(self):
+        tran_list = [(symbol, target) for (symbol, (target, weight)) in self._transition.items()]
         if not tran_list:
             return EPS_MOVE, self
 
@@ -195,6 +179,7 @@ class FST:
         self._accept_states = [(s, 1) for s in accept_states] if type(accept_states[0]) is str else accept_states
         # dictionary { q: State(q) } ... State has an attribute->transition which is a dict { symbol : (State, weight) }
         # the dictionary includes the artificial ACCEPT_STATE { state_name: State object }
+        self._transition_list = transitions
         self._transitions = self._build_transitions(states, start_state, self._accept_states, transitions)
 
     @property
@@ -335,6 +320,8 @@ class FST:
         else:
             # start from an empty sequence
             sequence = []
+            if curr_state.is_reject:
+                return []
             # shuffle symbols until accepted
             while not curr_state.is_art_accept:
                 symbol, curr_state = self._transitions[curr_state.id].go()
@@ -342,22 +329,88 @@ class FST:
             return sequence[:-1]
 
     # TODO think of stopping condition// maybe save the gnx?
-    def generate_negative(self, max_size):
-        sample_len = randint(1, max_size)
-        # start at initial state
-        curr_state = self._transitions[self._start_state]
-        # start from an empty sequence
-        sequence = []
-        # shuffle symbols until accepted
-        for i in range(sample_len-1):
-            symbol, curr_state = self._transitions[curr_state.id].go_negative()
-            if symbol == EPS_MOVE:
-                break
-            sequence.append(symbol)
-        symbol, curr_state = self._transitions[curr_state.id].go_negative(end=True)
-        if symbol != EPS_MOVE:
-            sequence.append(symbol)
+    def generate_negative(self, sample_len=None):
+        sample_len = sample_len if sample_len else randint(1, 50)
+
+        negative_sample_generated = False
+        # shuffle symbols until negative sample was generated
+        while not negative_sample_generated:
+            # start at initial state
+            curr_state = self._transitions[self._start_state]
+            # start from an empty sequence
+            sequence = []
+
+            for _ in range(sample_len):
+                symbol, curr_state = self._transitions[curr_state.id].go_negative()
+                sequence.append(symbol)
+
+            # check if the sample is negative
+            if not curr_state.is_accept:
+                negative_sample_generated = True
         return sequence
+
+    def effective_deg(self, deg_type=IN_AND_OUT_DEG):
+        # build FST graph
+        gnx = nx.DiGraph()
+        list_edges = []
+        for tran in self._transition_list:
+            # discard symbols and weights
+            source, symbol, target, weight = tran if len(tran) == 4 else list(tran) + [1]
+            if source == ART_ACCEPT_STATE or target == ART_ACCEPT_STATE:
+                continue
+            list_edges.append((source, target))
+        gnx.add_edges_from(list_edges)
+        if deg_type == IN_AND_OUT_DEG:
+            deg = dict(gnx.degree(gnx.nodes))
+        if deg_type == IN_DEG:
+            deg = dict(gnx.in_degree(gnx.nodes))
+        if deg_type == OUT_DEG:
+            deg = dict(gnx.out_degree(gnx.nodes))
+        return deg
+
+    def mean_variance_sequence_len(self, num_samples=100):
+        import numpy as np
+        sequence_len = []
+        for _ in range(num_samples):
+            sequence_len.append(len(self.go()))
+        return np.mean(sequence_len), np.std(sequence_len)
+
+    def accept_percentage(self, min_len=1, max_len=100, num_samples=100):
+        accepted = 0
+        for sample_num in range(num_samples):
+            sample_len = randint(min_len, max_len)
+
+            # start at initial state
+            curr_state = self._transitions[self._start_state]
+            for _ in range(sample_len):
+                symbol, curr_state = self._transitions[curr_state.id].go_negative()
+
+            # check if the sample is negative
+            if curr_state.is_accept:
+                accepted += 1
+        return accepted / num_samples
+
+    def plot_fst(self, name="fst", path=os.path.join("graphviz_fst")):
+        dot = Digraph(comment=name, format="svg")
+        # add states as nodes to the graph + label is_accept/is_reject/is_init
+        for state in sorted(self._states):
+            if state == ART_ACCEPT_STATE or state == REJECT_STATE:
+                continue
+            dot.node(state,
+                     state + " "
+                     + ("  -initial_state" if self._transitions[state].is_init else "")
+                     + ("  -accept_state" if self._transitions[state].is_accept else "")
+                     + ("  -reject_state" if self._transitions[state].is_reject else "")
+                     )
+        # add transition as edges to the graph
+        for tran in self._transition_list:
+            # discard symbols and weights
+            source, symbol, target, weight = tran if len(tran) == 4 else list(tran) + [1]
+            if source == ART_ACCEPT_STATE or target == ART_ACCEPT_STATE:
+                continue
+            dot.edge(source, target, label=symbol)
+
+        dot.render(path, view=False)
 
 
 """
@@ -443,5 +496,7 @@ if __name__ == "__main__":
     print("sample:" + rand)
     assert _fst.go(rand)
     for i in range(100):
-        assert not _fst.go(_fst.generate_negative(max_size=i*2 + 3))[1]
+        _neg = _fst.generate_negative(sample_len=i*2 + 3)
+        print("".join(_neg))
+        assert not _fst.go(_neg)[1]
     e = 0
