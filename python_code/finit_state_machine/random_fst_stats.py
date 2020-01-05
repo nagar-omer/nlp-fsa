@@ -7,15 +7,16 @@ import matplotlib.pyplot as plt
 
 
 class RandomFstStats:
-    def __init__(self, min_alphabet, max_alphabet, min_states, max_states, accept_percent=10, samples_to_check=100):
+    # if num_accept_states is --not-- None than accept_percent is dismissed
+    def __init__(self, min_alphabet, max_alphabet, min_states, max_states, accept_percent=10, num_accept_states=None
+                 , samples_to_check=100):
         self._min_alphabet = min_alphabet
         self._max_alphabet = max_alphabet
         self._min_states = min_states
         self._max_states = max_states
-        self._accept_percent = accept_percent
         self._total_samples = samples_to_check
         # list of list fst_matrix = [alphabet_size][state_size] -> list of k random fst
-        self._random_fst = self._rand_fst_set()
+        self._random_fst = self._rand_fst_set(accept_percent, num_accept_states)
 
     def _heat_matrix(self, matrix, title, norm=False):
         m = deepcopy(matrix)
@@ -50,7 +51,7 @@ class RandomFstStats:
     def _alphabet_idx(self, idx):
         return idx - self._min_alphabet
 
-    def _rand_fst_set(self):
+    def _rand_fst_set(self, accept_percent, num_accept_states):
         print("\nstart randomize FSTs")
         all, curr = (self._max_alphabet - self._min_alphabet) * (self._max_states - self._min_states), 0
         fst_matrix = []
@@ -60,7 +61,8 @@ class RandomFstStats:
                 curr += 1
                 print("\r\r\r\r\r\r\r\r\r\r\r" + str(int(100 * (curr / all))) + "%", end="")
 
-                accept_size = max(1, self._accept_percent * state_size // 100)
+                accept_size = max(1, accept_percent * state_size // 100)
+                accept_size = accept_size if num_accept_states is None else num_accept_states
                 sample_list = []
                 for _ in range(self._total_samples):
                     rand_fst = FSTools().rand_fst(state_size, alphabet_size, accept_size)
@@ -110,7 +112,7 @@ class RandomFstStats:
                     sequence_len_std_list.append(fst_std)
 
                 mean_matrix[alph_idx].append(np.mean(sequence_len_mean_list))
-                std_matrix[alph_idx].append(np.mean(sequence_len_std_list))
+                std_matrix[alph_idx].append(np.std(sequence_len_std_list))
         return mean_matrix, std_matrix
 
     def _accept_percentage_heatmap(self):
@@ -133,7 +135,7 @@ class RandomFstStats:
 
 
 if __name__ == "__main__":
-    r = RandomFstStats(min_alphabet=2, max_alphabet=20, min_states=5, max_states=35, samples_to_check=50)
+    r = RandomFstStats(min_alphabet=5, max_alphabet=11, min_states=15, max_states=21, samples_to_check=50, num_accept_states=2)
     r.plot_effective_deg()
     r.plot_accept_percent()
     r.plot_sequence_len()

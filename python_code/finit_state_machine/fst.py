@@ -200,7 +200,7 @@ class FST:
 
     def accept_states(self, weight=False):
         for acc_state in self._accept_states:
-            yield acc_state[0] if weight else acc_state
+            yield acc_state if weight else acc_state[0]
 
     def state(self, name):
         return self._transitions[name]
@@ -289,10 +289,12 @@ class FST:
         accept_set = set([s for s, w in accept_states])
         reject_states = self._get_reject_states(transitions, accept_states)
         global_reject_state = State(REJECT_STATE, None, is_reject=True)  # artificial reject state
-        self._states.add(REJECT_STATE)
+        global_reject_state._reject_state = global_reject_state
         # build a dictionary of name to State objects
         state_dict = {q: State(q, global_reject_state, is_init=q == init_state, is_accept=q in accept_set,
-                               is_reject=q in reject_states) for q in states}
+                               is_reject=q in reject_states) for q in self._states}
+        self._states.add(REJECT_STATE)
+        state_dict[REJECT_STATE] = global_reject_state
         # add a artificial node for accept state
         state_dict[ART_ACCEPT_STATE] = State(ART_ACCEPT_STATE, global_reject_state, is_accept=True, artificial_accept=True)
         for acc_state, acc_weight in accept_states:
@@ -329,8 +331,7 @@ class FST:
             return sequence[:-1]
 
     # TODO think of stopping condition// maybe save the gnx?
-    def generate_negative(self, sample_len=None):
-        sample_len = sample_len if sample_len else randint(1, 50)
+    def generate_negative(self, sample_len=randint(1, 50)):
 
         negative_sample_generated = False
         # shuffle symbols until negative sample was generated
@@ -342,6 +343,8 @@ class FST:
 
             for _ in range(sample_len):
                 symbol, curr_state = self._transitions[curr_state.id].go_negative()
+                if symbol == EPS_MOVE:
+                    break
                 sequence.append(symbol)
 
             # check if the sample is negative
@@ -349,17 +352,31 @@ class FST:
                 negative_sample_generated = True
         return sequence
 
+    def generate_relative_negative(self, list_accept: set, accepted_seq_only=False, sample_len=randint(1, 50)):
+        negative_sample_generated = False
+        # shuffle symbols until negative sample was generated
+        while not negative_sample_generated:
+            # start at initial state
+            curr_state = self._transitions[self._start_state]
+            # start from an empty sequence
+            sequence = []
+            for idx in range(sample_len):
+                symbol, curr_state = self._transitions[curr_state.id].go_negative()
+                if symbol == EPS_MOVE or curr_state.is_art_accept:
+                    break
+                sequence.append(symbol)
+
+            # check if the sample is negative
+            if not accepted_seq_only and not curr_state.is_accept:                # negative reject state sample
+                negative_sample_generated = True
+            elif curr_state.is_accept and curr_state.id not in list_accept:       # negative accept state sample
+                negative_sample_generated = True
+
+        return sequence
+
     def effective_deg(self, deg_type=IN_AND_OUT_DEG):
         # build FST graph
-        gnx = nx.DiGraph()
-        list_edges = []
-        for tran in self._transition_list:
-            # discard symbols and weights
-            source, symbol, target, weight = tran if len(tran) == 4 else list(tran) + [1]
-            if source == ART_ACCEPT_STATE or target == ART_ACCEPT_STATE:
-                continue
-            list_edges.append((source, target))
-        gnx.add_edges_from(list_edges)
+        gnx = self.gnx
         if deg_type == IN_AND_OUT_DEG:
             deg = dict(gnx.degree(gnx.nodes))
         if deg_type == IN_DEG:
@@ -367,6 +384,37 @@ class FST:
         if deg_type == OUT_DEG:
             deg = dict(gnx.out_degree(gnx.nodes))
         return deg
+
+    @property
+    def gnx(self):
+        gnx = nx.DiGraph()
+        list_edges = []
+        for state_id in self._states:
+            source_state = self._transitions[state_id]
+            if source_state.is_art_accept or source_state.is_reject:
+                continue
+
+            for sym in self._alphabet:
+                target_state = source_state.go(sym)
+                if target_state.is_art_accept:
+                    continue
+                list_edges.append((source_state.id, target_state.id))
+
+        gnx.add_edges_from(list_edges)
+        return gnx
+
+    def full_transition_list(self):
+        full_transitions = []
+        for state_id in self._states:
+            source_state = self._transitions[state_id]
+            if source_state.is_art_accept or source_state.is_reject:
+                continue
+            for sym in self._alphabet:
+                target_state = source_state.go(sym)
+                if target_state.is_art_accept:
+                    continue
+                full_transitions.append((source_state.id, sym, target_state.id))
+        return full_transitions
 
     def mean_variance_sequence_len(self, num_samples=100):
         import numpy as np
